@@ -1,14 +1,18 @@
-import React, { useState, useEffect } from 'react';
+import React, { useMemo, useRef, useState, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './ui/dialog';
 import { Button } from './ui/button';
-import { Input } from './ui/input';
 import { ScrollArea } from './ui/scroll-area';
-import { Send, MessageCircle, Terminal, CheckCircle, AlertCircle } from 'lucide-react';
+import { Terminal, X, ChevronUp } from 'lucide-react';
 import { enhancedAiService } from '../services/enhancedAiService';
+import { aiService, type NodeData } from '../services/aiService';
 import { toast } from 'sonner';
 import { pickFlavorStatus, shouldShowActiveStatus } from './ChatDialogStatus';
 import { cn } from './ui/utils';
+import { ChatComposerArea, type SlashCommandItem } from './ChatComposerArea';
+import { buildAiQuestionSuggestions, buildNodeChatSuggestions, type NodeChatSuggestion } from './chatNodeSuggestions';
+import { DOTM_LOADERS, pickNextLoaderIndex } from './ui/dotm-loaders';
+import { useCanvasStore, type Node } from '../store/canvasStore';
 
 interface Message {
   id: string;
@@ -58,7 +62,6 @@ function parseInlineMarkdown(text: string): InlineToken[] {
   if (index < text.length) {
     tokens.push({ text: text.slice(index), kind: 'text' });
   }
-
   return tokens;
 }
 
@@ -84,7 +87,6 @@ function renderInlineMarkdown(text: string): React.ReactNode {
 }
 
 function renderAssistantMessage(content: string, isToolResult?: boolean, toolName?: string): React.ReactNode {
-  // If this is a tool result, render it differently
   if (isToolResult && toolName) {
     return (
       <div className="border-l-2 border-blue-400 pl-2">
@@ -170,7 +172,7 @@ function ShimmerStatusText({ children, className }: { children?: React.ReactNode
       initial={{ backgroundPositionX: '250%' }}
       animate={{ backgroundPositionX: ['-120%', '250%'] }}
       transition={{
-        duration: 2,
+        duration: 3.6,
         repeat: Infinity,
         repeatDelay: 1,
         ease: 'linear',
@@ -181,21 +183,56 @@ function ShimmerStatusText({ children, className }: { children?: React.ReactNode
   );
 }
 
+function nodeToSuggestionData(node: Node): NodeData {
+  const contentParts = [
+    node.content.value,
+    node.comment,
+    node.content.pageTitle,
+    node.content.url,
+    ...(node.content.links ?? []).map((link) => `${link.title} ${link.url}`),
+  ]
+    .filter((part): part is string => typeof part === 'string' && part.trim().length > 0)
+    .join(' | ');
+
+  return {
+    id: node.id,
+    title: node.content.title || node.content.pageTitle || node.content.value?.slice(0, 80) || `${node.content.type} node`,
+    content: contentParts,
+    groupId: node.groupId,
+    tags: node.tags,
+    links: node.content.links,
+    images: node.content.images,
+    videos: node.content.videos,
+    type: node.content.type === 'browser' ? 'link' : node.content.type,
+  };
+}
+
+const SLASH_COMMANDS: SlashCommandItem[] = [
+  { fill: '/clear', description: 'Clear this chat' },
+  { fill: '/websearch ', description: 'Search the web and show direct results' },
+  { fill: '/summarize_selection', description: 'Summarize selected nodes' },
+  { fill: '/find_similar ', description: 'Find nodes similar to a node ID' },
+  { fill: '/suggest_connections', description: 'Suggest connections between selected nodes' },
+  { fill: '/get_canvas_summary', description: 'Get a quick canvas overview' },
+  { fill: '/organize_group ', description: 'Get layout suggestions for a group ID' },
+];
+
 export function EnhancedChatDialog({ open, onOpenChange }: EnhancedChatDialogProps) {
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: 'welcome',
-      content: "Enhanced AI Assistant with tools! Try /websearch [topic], /summarize_selection, /find_similar [node_id], or just chat normally.",
-      isUser: false,
-      timestamp: new Date()
-    }
-  ]);
+  const nodes = useCanvasStore((state) => state.nodes);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [inputMessage, setInputMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [currentStatus, setCurrentStatus] = useState('');
   const [activeAiMessageId, setActiveAiMessageId] = useState<string | null>(null);
   const [isStreamingResponse, setIsStreamingResponse] = useState(false);
-  const [showCommands, setShowCommands] = useState(false);
+  const [nodeSuggestions, setNodeSuggestions] = useState<NodeChatSuggestion[]>([]);
+  const lastSuggestionNodeCountRef = useRef<number | null>(null);
+  const [loaderIndex, setLoaderIndex] = useState<number | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const StatusLoader = DOTM_LOADERS[loaderIndex ?? 0];
+
+  const fallbackSuggestions = useMemo(() => buildNodeChatSuggestions(nodes).slice(0, 4), [nodes]);
 
   useEffect(() => {
     if (!isLoading || isStreamingResponse) return;
@@ -211,12 +248,7 @@ export function EnhancedChatDialog({ open, onOpenChange }: EnhancedChatDialogPro
   // Auto-scroll to bottom when new messages are added
   useEffect(() => {
     if (open) {
-      setTimeout(() => {
-        const scrollContainer = document.querySelector('[data-radix-scroll-area-viewport]');
-        if (scrollContainer) {
-          scrollContainer.scrollTop = scrollContainer.scrollHeight;
-        }
-      }, 100);
+      window.setTimeout(() => messagesEndRef.current?.scrollIntoView({ block: 'end' }), 80);
     }
   }, [messages, open]);
 
@@ -224,13 +256,49 @@ export function EnhancedChatDialog({ open, onOpenChange }: EnhancedChatDialogPro
   useEffect(() => {
     if (open) {
       setTimeout(() => {
-        const inputElement = document.querySelector('[data-enhanced-chat-input]') as HTMLInputElement;
+        const inputElement = document.getElementById('enhanced-chat-composer') as HTMLTextAreaElement | null;
         if (inputElement) {
           inputElement.focus();
         }
       }, 200);
     }
   }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    if (lastSuggestionNodeCountRef.current === nodes.length && nodeSuggestions.length > 0) return;
+
+    let cancelled = false;
+    lastSuggestionNodeCountRef.current = nodes.length;
+
+    const generateSuggestions = async () => {
+      if (!nodes.length) {
+        setNodeSuggestions([]);
+        return;
+      }
+
+      try {
+        const topNodes = [...nodes]
+          .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+          .slice(0, 12)
+          .map(nodeToSuggestionData);
+        const questions = await aiService.suggestLikelyQuestionsFromNodes(topNodes);
+        if (cancelled) return;
+        const aiSuggestions = buildAiQuestionSuggestions(nodes, questions).slice(0, 4);
+        setNodeSuggestions(aiSuggestions.length ? aiSuggestions : fallbackSuggestions);
+      } catch (error) {
+        if (cancelled) return;
+        console.warn('[AI Suggestions] Falling back to local canvas suggestions:', error);
+        setNodeSuggestions(fallbackSuggestions);
+      }
+    };
+
+    generateSuggestions();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [open, nodes, nodes.length, nodeSuggestions.length, fallbackSuggestions]);
 
   // Listen for close all dialogs event
   useEffect(() => {
@@ -242,18 +310,15 @@ export function EnhancedChatDialog({ open, onOpenChange }: EnhancedChatDialogPro
     return () => window.removeEventListener('closeAllDialogs', handleCloseAllDialogs);
   }, [onOpenChange]);
 
-  // Show command hints
-  useEffect(() => {
-    if (inputMessage.startsWith('/')) {
-      setShowCommands(true);
-    } else {
-      setShowCommands(false);
-    }
-  }, [inputMessage]);
-
   const handleSendMessage = async () => {
     const message = inputMessage.trim();
     if (!message || isLoading) return;
+
+    if (message === '/clear') {
+      clearChat();
+      setInputMessage('');
+      return;
+    }
 
     const userMessage: Message = {
       id: `user-${Date.now()}`,
@@ -265,6 +330,7 @@ export function EnhancedChatDialog({ open, onOpenChange }: EnhancedChatDialogPro
     setMessages(prev => [...prev, userMessage]);
     setInputMessage('');
     setIsLoading(true);
+    setLoaderIndex((previous) => pickNextLoaderIndex(previous));
 
     let aiMessageId: string | null = null;
 
@@ -305,7 +371,7 @@ export function EnhancedChatDialog({ open, onOpenChange }: EnhancedChatDialogPro
       if (aiMessageId) {
         setMessages(prev => prev.filter((msg) => msg.id !== aiMessageId || msg.content.trim().length > 0));
       }
-      
+
       const errorMessage: Message = {
         id: `error-${Date.now()}`,
         content: `AI could not respond right now: ${error instanceof Error ? error.message : 'request failed'}`,
@@ -322,160 +388,146 @@ export function EnhancedChatDialog({ open, onOpenChange }: EnhancedChatDialogPro
     }
   };
 
-  const handleKeyPress = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSendMessage();
-    }
-  };
-
   const clearChat = () => {
-    setMessages([
-      {
-        id: 'welcome',
-        content: "Enhanced AI Assistant with tools! Try /websearch [topic], /summarize_selection, /find_similar [node_id], or just chat normally.",
-        isUser: false,
-        timestamp: new Date()
-      }
-    ]);
+    setMessages([]);
   };
 
-  const availableCommands = [
-    '/clear - Clear chat history',
-    '/websearch [query] - Search web for information',
-    '/summarize_selection - Summarize selected nodes',
-    '/find_similar [node_id] - Find similar nodes',
-    '/suggest_connections - Suggest connections between selected nodes',
-    '/get_canvas_summary - Get canvas overview',
-    '/organize_group [group_id] - Get group organization suggestions'
-  ];
+  // Greeting name from profile
+  const username = useCanvasStore((s) => s.settings.profile.username);
+  const displayName = username || 'there';
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md h-[500px] flex flex-col ai-chat-panel" style={{ zIndex: 50 }}>
-        <DialogHeader className="flex-shrink-0">
-          <DialogTitle className="flex items-center gap-2">
-            <Terminal className="w-5 h-5" />
-            Enhanced AI Assistant
-            <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">Tools Enabled</span>
-          </DialogTitle>
+    <Dialog open={open} onOpenChange={onOpenChange} modal={false}>
+        <DialogContent
+           hideOverlay
+           className="ai-chat-panel fixed !left-auto !right-2 !top-2 z-50 flex h-[calc(100vh-1rem)] w-[min(380px,calc(100vw-1rem))] max-w-none !translate-x-0 !translate-y-0 flex-col gap-3 rounded-xl border border-border/50 bg-[#1e1f20] text-[#e3e3e3] font-sans overflow-hidden shadow-2xl backdrop-blur-md data-[state=closed]:slide-out-to-right-full data-[state=open]:slide-in-from-right-full sm:max-w-none"
+           style={{ background: 'linear-gradient(to bottom, rgba(30,31,32,0.95), rgba(30,31,32,0.98))' }}
+         >
+        {/* Zig-zag mesh background - fades to 0 behind greeting, visible at bottom */}
+        <div className="absolute inset-0 pointer-events-none"
+             style={{
+               backgroundImage: `linear-gradient(135deg, rgba(30,31,32,0.6) 25%, transparent 25%),
+                                linear-gradient(225deg, rgba(30,31,32,0.6) 25%, transparent 25%),
+                                linear-gradient(45deg, rgba(30,31,32,0.6) 25%, transparent 25%),
+                                linear-gradient(315deg, rgba(30,31,32,0.6) 25%, transparent 25%)`,
+               backgroundPosition: '10px 0, 10px 0, 0 0, 0 0',
+               backgroundSize: '20px 20px',
+               backgroundRepeat: 'repeat',
+                 maskImage: 'linear-gradient(to bottom, rgba(0,0,0,0) 0%, rgba(0,0,0,0) 75%, rgba(0,0,0,0.6) 100%)',
+                 WebkitMaskImage: 'linear-gradient(to bottom, rgba(0,0,0,0) 0%, rgba(0,0,0,0) 75%, rgba(0,0,0,0.6) 100%)',
+             } as React.CSSProperties}
+        />
+
+        {/* Header - no title, no icon, no Tools badge */}
+        <DialogHeader className="sr-only">
+          <DialogTitle>AI Chat Assistant</DialogTitle>
           <DialogDescription>
             Chat with AI with canvas-aware tools and commands
           </DialogDescription>
         </DialogHeader>
 
-        {/* Command hints */}
-        {showCommands && (
-          <div className="flex-shrink-0 bg-muted/50 rounded-lg p-3 text-xs">
-            <div className="font-semibold mb-2">Available Commands:</div>
-            <div className="space-y-1">
-              {availableCommands.map((cmd, idx) => (
-                <div key={idx} className="text-muted-foreground">{cmd}</div>
-              ))}
-            </div>
-          </div>
-        )}
+        {/* Scrollable Main Area */}
+        <main
+          ref={messagesEndRef}
+          className="relative z-10 flex-1 flex flex-col overflow-y-auto px-1 scroll-smooth"
+        >
+          {/* Spacer to push content down to ~75% mark */}
+          <div className="flex-1 min-h-[50vh]"></div>
 
-        {/* Messages Area */}
-        <div className="flex-1 flex flex-col gap-4 min-h-0">
-          <ScrollArea className="flex-grow border rounded-lg p-3 min-h-0">
-            <div className="space-y-4">
-              {messages.map((message) => {
-                const showStatus = shouldShowActiveStatus({
-                  activeMessageId: activeAiMessageId,
-                  messageId: message.id,
-                  currentStatus,
-                  isUserMessage: message.isUser,
-                });
-                const showBubble = message.isUser || message.content.trim().length > 0 || !showStatus;
-
-                return (
-                  <div
-                    key={message.id}
-                    className={`flex ${message.isUser ? 'justify-end' : 'justify-start'}`}
-                  >
-                    <div className={`max-w-[85%] flex flex-col ${message.isUser ? 'items-end' : 'items-start'}`}>
-                      {showStatus && (
-                        <div className="text-xs opacity-90 font-mono mb-1 ml-1">
-                          <ShimmerStatusText>{currentStatus}</ShimmerStatusText>
-                          <span className="ai-chat-status-dots" aria-hidden="true">
-                            <span>.</span>
-                            <span>.</span>
-                            <span>.</span>
-                          </span>
-                        </div>
-                      )}
-
-                      {showBubble && (
-                        <div
-                          className={`rounded-lg p-3 ${
-                            message.isUser
-                              ? 'bg-primary text-primary-foreground'
-                              : message.isToolResult
-                              ? 'bg-blue-50 border border-blue-200 text-blue-900'
-                              : 'bg-muted text-muted-foreground'
-                          }`}
-                        >
-                          <div className="text-sm break-words overflow-wrap-anywhere">
-                            {message.isUser ? (
-                              <p className="whitespace-pre-wrap">{message.content}</p>
-                            ) : (
-                              <div className="whitespace-pre-wrap">
-                                {renderAssistantMessage(message.content, message.isToolResult, message.toolName)}
-                              </div>
-                            )}
-                          </div>
-                          <p className="text-xs opacity-70 mt-1">
-                            {message.timestamp.toLocaleTimeString([], {
-                              hour: '2-digit',
-                              minute: '2-digit'
-                            })}
-                          </p>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </ScrollArea>
-
-          {/* Input Area */}
-          <div className="flex-shrink-0 space-y-2">
-            <div className="flex gap-2">
-              <Input
-                data-enhanced-chat-input
-                value={inputMessage}
-                onChange={(e) => setInputMessage(e.target.value)}
-                onKeyPress={handleKeyPress}
-                placeholder="Type / for commands or ask normally..."
-                disabled={isLoading}
-                className="flex-1"
-              />
-              <Button
-                onClick={handleSendMessage}
-                disabled={!inputMessage.trim() || isLoading}
-                size="sm"
-              >
-                <Send className="w-4 h-4" />
-              </Button>
-            </div>
-            
-            <div className="flex justify-between items-center">
-              <Button
-                onClick={clearChat}
-                variant="ghost"
-                size="sm"
-                className="text-xs h-6"
-              >
-                Clear Chat
-              </Button>
-              <p className="text-xs text-muted-foreground">
-                Press Enter to send, Shift+Enter for new line
+          {/* Hero Greeting - Positioned Lower */}
+          {messages.length === 0 && (
+            <div className="w-full mx-auto mb-8 transform translate-y-[-10%] animate-in fade-in slide-in-from-bottom-4 duration-700">
+              <h1 className="text-2xl font-semibold mb-2 bg-gradient-to-r from-blue-400 via-purple-400 to-pink-400 bg-clip-text text-transparent">
+                Hello, {displayName.toUpperCase()}
+              </h1>
+              <p className="text-xl font-medium text-gray-500">
+                How can I help you today?
               </p>
             </div>
+          )}
+
+          {/* Messages */}
+          <div className="space-y-4">
+            {messages.map((message) => {
+              const showStatus = shouldShowActiveStatus({
+                activeMessageId: activeAiMessageId,
+                messageId: message.id,
+                currentStatus,
+                isUserMessage: message.isUser,
+              });
+              const showBubble = message.isUser || message.content.trim().length > 0 || !showStatus;
+
+              return (
+                <div
+                  key={message.id}
+                  className={`flex ${message.isUser ? 'justify-end' : 'justify-start'}`}
+                >
+                  <div className={`max-w-[85%] flex flex-col ${message.isUser ? 'items-end' : 'items-start'}`}>
+                    {showStatus && (
+                      <div className="text-xs opacity-90 font-mono mb-1 ml-1 flex items-center gap-2">
+                        <StatusLoader className="text-orange-500" />
+                        <ShimmerStatusText>{currentStatus}</ShimmerStatusText>
+                        <span className="ai-chat-status-dots" aria-hidden="true">
+                          <span>.</span>
+                          <span>.</span>
+                          <span>.</span>
+                        </span>
+                      </div>
+                    )}
+
+                    {showBubble && (
+                      <div
+                        className={`rounded-lg p-3 ${
+                          message.isUser
+                            ? 'bg-primary text-primary-foreground'
+                            : message.isToolResult
+                            ? 'bg-orange-50/10 border border-orange-200/20 text-orange-100'
+                            : 'bg-muted/50 text-muted-foreground'
+                        }`}
+                      >
+                        <div className="text-sm break-words overflow-wrap-anywhere">
+                          {message.isUser ? (
+                            <p className="whitespace-pre-wrap">{message.content}</p>
+                          ) : (
+                            <div className="whitespace-pre-wrap">
+                              {renderAssistantMessage(message.content, message.isToolResult, message.toolName)}
+                            </div>
+                          )}
+                        </div>
+                        <p className="text-xs opacity-70 mt-1">
+                          {message.timestamp.toLocaleTimeString([], {
+                            hour: '2-digit',
+                            minute: '2-digit'
+                          })}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+            <div ref={messagesEndRef} />
           </div>
-        </div>
+
+          <div className="h-4 w-full"></div>
+        </main>
+
+        {/* Footer / Input Container */}
+        <footer className="relative z-20 p-1 w-full">
+          <ChatComposerArea
+            value={inputMessage}
+            onChange={setInputMessage}
+            onSend={handleSendMessage}
+            disabled={isLoading}
+            placeholder="type / for skills..."
+            composerId="enhanced-chat-composer"
+            nodeSuggestions={nodeSuggestions}
+            slashCommands={SLASH_COMMANDS}
+            isLoading={isLoading}
+          />
+        </footer>
+
+        {/* Close button - using DialogContent's built-in close, no duplicate */}
       </DialogContent>
     </Dialog>
   );

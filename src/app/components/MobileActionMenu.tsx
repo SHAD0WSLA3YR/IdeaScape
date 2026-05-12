@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Plus, Users, Search, MessageCircle } from 'lucide-react';
 import { useCanvasStore } from '../store/canvasStore';
 import { NodeSearchDialog } from './NodeSearchDialog';
-import { ChatDialog } from './ChatDialog';
+import { EnhancedChatDialog } from './EnhancedChatDialog';
 import { toast } from 'sonner';
 
 export function MobileActionMenu() {
@@ -140,7 +140,7 @@ export function MobileActionMenu() {
         onOpenChange={setSearchOpen} 
       />
       
-      <ChatDialog 
+      <EnhancedChatDialog 
         open={chatOpen} 
         onOpenChange={setChatOpen} 
       />

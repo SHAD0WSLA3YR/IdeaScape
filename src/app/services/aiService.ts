@@ -21,6 +21,7 @@ export const NVIDIA_MODELS = {
   'mistralai/mistral-large-3-675b-instruct-2512': 'Mistral Large 3',
   'z-ai/glm4.7':                               'GLM 4.7',
   'nvidia/llama-3.3-nemotron-super-49b-v1.5':  'Nemotron Super 49B',
+  'stepfun-ai/step-3.5-flash':                  'Step 3.5 Flash',
 } as const;
 
 export type NvidiaModelId = keyof typeof NVIDIA_MODELS;
@@ -73,6 +74,7 @@ const MAX_TOKENS = {
   GROUP_NAMES: 400,
   CHAT: 1200,
   SMART_SUMMARY: 550,
+  QUESTION_SUGGESTIONS: 512,
 } as const;
 
 const TEMPERATURE = 0.7;
@@ -85,6 +87,13 @@ interface RequestOptions {
   temperature?: number;
   stream?: boolean;
 }
+
+type QuestionSuggestionResponse = {
+  q1?: string;
+  q2?: string;
+  q3?: string;
+  q4?: string;
+};
 
 // ── Service ──────────────────────────────────────────────────────────────────
 
@@ -242,10 +251,7 @@ class AIService {
     let content = `Title: "${node.title}"`;
 
     if (node.content && node.content.trim()) {
-      const plainText = node.content
-        .replace(/<[^>]*>/g, '')
-        .replace(/&nbsp;/g, ' ')
-        .trim();
+      const plainText = this.stripHtml(node.content);
       if (plainText && plainText !== node.title) {
         content += `\nContent: "${plainText}"`;
       }
@@ -265,6 +271,21 @@ class AIService {
     }
 
     return content;
+  }
+
+  private stripHtml(input: string): string {
+    return input
+      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, ' ')
+      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, ' ')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/&nbsp;/gi, ' ')
+      .replace(/&amp;/gi, '&')
+      .replace(/&lt;/gi, '<')
+      .replace(/&gt;/gi, '>')
+      .replace(/&#39;/gi, "'")
+      .replace(/&quot;/gi, '"')
+      .replace(/\s+/g, ' ')
+      .trim();
   }
 
   private isValidContent(content: string): boolean {
@@ -536,6 +557,94 @@ Rules:
 - Do not explain your process.`;
 
     return this.makeRequest(prompt, MAX_TOKENS.SMART_SUMMARY);
+  }
+
+  async suggestLikelyQuestionsFromNodes(nodes: NodeData[]): Promise<string[]> {
+    const contentLines = nodes
+      .map((node) => {
+        const contentParts = [
+          this.stripHtml(node.content ?? ''),
+          ...(node.links ?? []).map((link) => `${link.title} ${link.url}`),
+          ...(node.tags?.length ? [`Tags: ${node.tags.join(', ')}`] : []),
+        ]
+          .map((part) => part.trim())
+          .filter(Boolean);
+
+        const content = contentParts.join(' | ') || this.stripHtml(node.title);
+        return content ? `Content: "${content.slice(0, 700)}"` : '';
+      })
+      .filter(Boolean)
+      .slice(0, 12);
+
+    if (!contentLines.length) return [];
+
+    const prompt = `You are generating question suggestions for a chatbox.
+Given the node information below, return the most likely questions a user will ask on this content.
+
+Node info:
+${contentLines.map((line, index) => `${index + 1}. ${line}`).join('\n')}
+
+YOU MUST RETURN ONLY VALID JSON. No other text, no explanation, no markdown fences.
+Output must be exactly this JSON shape:
+{"q1":"...","q2":"...","q3":"...","q4":"..."}
+
+Rules:
+- Exactly 4 questions, one per key (q1, q2, q3, q4).
+- Questions only, no answers.
+- Clear, natural wording.
+- Base the questions on the Node info above.
+- Do not include HTML/CSS/JS code or tags.
+- No markdown, no extra keys, no extra text, no \\n in strings.
+- If a string needs quotes, use escaped \\" not curly quotes.`;
+
+    const response = await this.makeRequest(prompt, MAX_TOKENS.QUESTION_SUGGESTIONS, {
+      allowFallback: true,
+      temperature: 0.35,
+    });
+
+    if ((import.meta as any)?.env?.DEV) {
+      console.debug('[AI Suggestion Raw]', response);
+    }
+
+    const parsed = this.parseQuestionSuggestionJson(response);
+
+    if ((import.meta as any)?.env?.DEV) {
+      console.debug('[AI Suggestion Parsed]', parsed);
+    }
+
+    return parsed;
+  }
+
+  private parseQuestionSuggestionJson(raw: string): string[] {
+    const extract = (value: unknown): string[] => {
+      if (!value || typeof value !== 'object') return [];
+      const data = value as QuestionSuggestionResponse;
+      return [data.q1, data.q2, data.q3, data.q4]
+        .filter((question): question is string => typeof question === 'string')
+        .map((question) => this.stripHtml(question).replace(/\s+/g, ' ').trim())
+        .filter(Boolean)
+        .slice(0, 4);
+    };
+
+    try {
+      const parsed = JSON.parse(raw.trim());
+      const questions = extract(parsed);
+      if (questions.length) return questions;
+    } catch {
+      /* continue */
+    }
+
+    const objectMatch = raw.match(/\{[\s\S]*"q1"[\s\S]*"q4"[\s\S]*\}/);
+    if (objectMatch) {
+      try {
+        const questions = extract(JSON.parse(objectMatch[0]));
+        if (questions.length) return questions;
+      } catch {
+        /* continue */
+      }
+    }
+
+    return [];
   }
 
   private getTopTags(nodes: NodeData[], limit: number): string[] {

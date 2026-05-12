@@ -4,7 +4,7 @@
  * inspired by Gemma 4's WebMCP system
  */
 
-import { aiService } from './aiService';
+import { AIProvider, aiService } from './aiService';
 import {
   webSearchTool,
   summarizeSelectionTool,
@@ -172,6 +172,9 @@ export class EnhancedAIService {
       
       // If tool succeeded, enhance the prompt with results
       if (toolResult.result.success && toolResult.result.data) {
+        if (toolInvocation.name === 'websearch') {
+          return this.formatDirectToolResult(toolResult);
+        }
         const enhancedPrompt = this.createToolEnhancedPrompt(message, toolResult);
         return this.aiService.chat(enhancedPrompt);
       } else {
@@ -200,6 +203,11 @@ export class EnhancedAIService {
       
       // If tool succeeded, enhance the prompt with results
       if (toolResult.result.success && toolResult.result.data) {
+        if (toolInvocation.name === 'websearch') {
+          const directResult = this.formatDirectToolResult(toolResult);
+          onChunk(directResult);
+          return directResult;
+        }
         const enhancedPrompt = this.createToolEnhancedPrompt(message, toolResult);
         console.log('[EnhancedAI] Enhanced prompt:', enhancedPrompt.substring(0, 200) + '...');
         return this.aiService.chatStream(enhancedPrompt, onChunk);
@@ -306,7 +314,29 @@ export class EnhancedAIService {
     }
     
     try {
-      const result = await tool.execute(toolCall.arguments);
+      let result: ToolResult;
+      switch (toolCall.name) {
+        case 'websearch':
+          result = await webSearchTool(toolCall.arguments.query);
+          break;
+        case 'find_similar':
+          result = await findSimilarTool(toolCall.arguments.node_id);
+          break;
+        case 'organize_group':
+          result = await organizeGroupTool(toolCall.arguments.group_id);
+          break;
+        case 'summarize_selection':
+          result = await summarizeSelectionTool();
+          break;
+        case 'suggest_connections':
+          result = await suggestConnectionsTool();
+          break;
+        case 'get_canvas_summary':
+          result = await getCanvasSummaryTool();
+          break;
+        default:
+          result = await tool.execute(toolCall.arguments);
+      }
       return {
         toolCall,
         result
@@ -381,6 +411,39 @@ export class EnhancedAIService {
     
     // Construct enhanced prompt: tool context + original request
     return `${toolContext}Based on the above information, please respond to the following user request:\n\n${originalMessage}`;
+  }
+
+  private formatDirectToolResult(toolResult: ToolExecutionResult): string {
+    const { toolCall, result } = toolResult;
+    if (!result.success || !result.data) {
+      return result.error || 'Tool execution failed.';
+    }
+
+    if (toolCall.name !== 'websearch') {
+      return JSON.stringify(result.data, null, 2);
+    }
+
+    const query = result.data.query || toolCall.arguments.query || 'your query';
+    const lines = [`Web search results for "${query}"`];
+
+    if (result.data.answer) {
+      lines.push('', String(result.data.answer));
+    }
+
+    const results = Array.isArray(result.data.results) ? result.data.results : [];
+    if (results.length > 0) {
+      lines.push('');
+      results.slice(0, 5).forEach((item: any, index: number) => {
+        const title = item.title || `Result ${index + 1}`;
+        const url = item.url ? `\n${item.url}` : '';
+        const snippet = item.snippet ? `\n${item.snippet}` : '';
+        lines.push(`${index + 1}. ${title}${url}${snippet}`);
+      });
+    } else if (result.data.summary) {
+      lines.push('', String(result.data.summary));
+    }
+
+    return lines.join('\n');
   }
 }
 
