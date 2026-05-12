@@ -6,3 +6,8 @@ dist/
 
 # Vercel design-system reference (local only)
 DESIGN.md
+
+# Local font files + PWA icons (large / optional in repo; keep on disk for dev/build)
+public/fonts/
+public/icon-192.svg
+public/icon-512.svg
