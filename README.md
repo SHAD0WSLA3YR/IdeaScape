@@ -17,9 +17,9 @@
 
 <div align="center">
 
-![IdeaScape main workspace — infinite canvas with welcome card, groups panel, and controls](assets/readme-ui-screenshot.png)
+![Figure 1 — IdeaScape main workspace (canvas, welcome card, groups, toolbars)](assets/fig-1.png)
 
-*Typical UI: canvas, welcome card, groups, and toolbars.*
+*Figure 1 — typical UI (canvas, welcome card, groups, toolbars).*
 
 </div>
 
@@ -66,7 +66,7 @@ Clean capture pipeline for **PNG**, **JPEG**, and **PDF** with group legend over
 <td width="50%">
 
 ### 👥 Real-Time Collaboration
-Live multi-user editing via **Supabase Realtime** channels. See collaborator cursors in real time, share canvases with a link, and sync state across sessions with presence awareness.
+Live multi-user editing via **Supabase Realtime** channels. See live collaborator presence in real time, share canvases with a link, and sync state across sessions with presence awareness.
 
 </td>
 </tr>
@@ -193,7 +193,7 @@ src/
 - **Refactored safety layers** — Error boundaries and resilient state management protect against cascading failures
 - **Vitest smoke tests** — Store integrity tests validate node CRUD, connections, groups, undo/redo, and command stats
 - **New export pipeline** — Unified PNG/JPEG/PDF export with `html-to-image` and `jspdf`, isolated into a dedicated vendor chunk for fast loading
-- **Collaboration system** — Supabase Realtime integration with presence, cursor sync, and canvas sharing
+- **Collaboration system** — Supabase Realtime integration with presence, live state sync, and canvas sharing
 - **Command palette** — Fuzzy search across all canvas actions with frequency-based ranking
 
 ### Up Next
