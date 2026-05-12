@@ -1,14 +1,15 @@
 import React, { useState, useRef, useEffect } from "react";
 import { motion } from "motion/react";
 import { Node, useCanvasStore } from "../store/canvasStore";
-import { ImageWithFallback } from "./ImageWithFallback";
+import { ImageWithFallback } from "./figma/ImageWithFallback";
 import { RichTextEditor } from "./RichTextEditor";
 import { ImageMasonry } from "./ImageMasonry";
 import { VideoMasonry } from "./VideoMasonry";
 import { LinkManager } from "./LinkManager";
 import { TagManager } from "./TagManager";
 import { BrowserNode } from "./BrowserNode";
-import { Maximize2, Trash2, Copy, Pin, PinOff, Sun, Moon, GripVertical, ChevronUp, ChevronDown, MessageSquareText } from "lucide-react";
+import { imgLineiconsComment1Text } from "../imports/svg-phjcw";
+import { Maximize2, Trash2, Copy, Pin, PinOff, Sun, Moon, GripVertical, ChevronUp, ChevronDown } from "lucide-react";
 import { createPortal } from "react-dom";
 
 interface CanvasNodeProps {
@@ -652,9 +653,11 @@ export function CanvasNode({
       {node.comment && (
         <div className="absolute bottom-0 left-0 right-0 min-h-10 max-h-20 bg-gray-300 dark:bg-gray-600 rounded-b-lg border-t border-gray-400 dark:border-gray-500 p-2">
           <div className="flex items-start gap-2">
-            <MessageSquareText
-              aria-label="Comment"
-              className="w-3 h-3 flex-shrink-0 mt-0.5 text-gray-600 dark:text-gray-300"
+            <img 
+              className="w-3 h-3 flex-shrink-0 mt-0.5" 
+              src={imgLineiconsComment1Text} 
+              alt="Comment"
+              style={{ filter: 'invert(0.4)' }}
             />
             <div className="flex-1 min-w-0">
               <span className="text-xs text-black dark:text-white font-medium block mb-1">Comment:</span>

@@ -1,6 +1,6 @@
 import React, { useState, useRef, useCallback } from 'react';
 import Masonry from 'react-responsive-masonry';
-import { ImageWithFallback } from './ImageWithFallback';
+import { ImageWithFallback } from './figma/ImageWithFallback';
 import { X } from 'lucide-react';
 import { ImageGallery } from './ImageGallery';
 

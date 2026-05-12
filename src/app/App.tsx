@@ -4,6 +4,7 @@ import { Toolbar } from './components/Toolbar';
 import { MobileToolbar } from './components/MobileToolbar';
 import { MobileActionMenu } from './components/MobileActionMenu';
 import { DesktopChatButton } from './components/DesktopChatButton';
+import { SecondChatButton } from './components/SecondChatButton';
 import { EditableTitle } from './components/EditableTitle';
 import { HelpPanel } from './components/HelpPanel';
 import { UserCursors } from './components/UserCursors';
@@ -410,6 +411,7 @@ export default function App() {
             <EditableTitle />
             <div className="flex space-x-2">
               <DesktopChatButton />
+              <SecondChatButton />
             </div>
           </>
         )}

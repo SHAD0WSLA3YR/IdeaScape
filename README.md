@@ -15,6 +15,14 @@
 
 </div>
 
+<div align="center">
+
+![Figure 1 — IdeaScape main workspace (canvas, welcome card, groups, toolbars)](assets/fig-1.png)
+
+*Figure 1 — typical UI (canvas, welcome card, groups, toolbars).*
+
+</div>
+
 ---
 
 ## 🧠 Core Features
