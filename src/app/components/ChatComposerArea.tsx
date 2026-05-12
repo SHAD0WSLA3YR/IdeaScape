@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from './ui/button';
 import { Textarea } from './ui/textarea';
-import { ArrowUp, ChevronDown } from 'lucide-react';
+import { ArrowUp, ChevronDown, Send } from 'lucide-react';
 import { cn } from './ui/utils';
 import type { NodeChatSuggestion } from './chatNodeSuggestions';
 
@@ -140,6 +140,7 @@ export function ChatComposerArea({
       if (e.key === 'Escape') {
         e.preventDefault();
         setFocused(false);
+        setCanvasMenuOpen(false);
         return;
       }
       if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) {
@@ -155,73 +156,74 @@ export function ChatComposerArea({
     }
   };
 
+  const renderDropdownContent = () => {
+    if (!showDropdown) return null;
+
+    if (showSlash) {
+      return (
+        <div className="bg-[#2a2b2c] rounded-xl border border-white/10 shadow-xl p-1">
+          {filteredSlash.map((cmd, i) => (
+            <button
+              key={`${cmd.fill}-${cmd.description}-${i}`}
+              type="button"
+              role="option"
+              aria-selected={i === highlightIndex}
+              className={cn(
+                'flex w-full flex-col items-start gap-0.5 rounded-sm px-2 py-2 text-left text-sm',
+                i === highlightIndex ? 'bg-accent text-accent-foreground' : 'hover:bg-muted/80',
+              )}
+              onMouseEnter={() => setHighlightIndex(i)}
+              onMouseDown={(ev) => {
+                ev.preventDefault();
+                applyInsert(cmd.fill);
+              }}
+            >
+              <span className="font-mono text-sm font-medium">{cmd.fill.trim()}</span>
+              <span className="text-sm text-foreground/90 dark:text-foreground/95">{cmd.description}</span>
+            </button>
+          ))}
+        </div>
+      );
+    }
+
+    return (
+      <div className="bg-[#2a2b2c] rounded-xl border border-white/10 shadow-xl p-1">
+        <div className="px-2 py-1.5 text-sm font-medium uppercase tracking-wide text-foreground/90 dark:text-foreground/95">
+          From your canvas
+        </div>
+        {nodeSuggestions.map((s, i) => (
+          <button
+            key={s.id}
+            type="button"
+            role="option"
+            aria-selected={i === highlightIndex}
+            className={cn(
+              'flex w-full flex-col items-start gap-0.5 rounded-sm px-2 py-2 text-left text-sm',
+              i === highlightIndex ? 'bg-accent text-accent-foreground' : 'hover:bg-muted/80',
+            )}
+            onMouseEnter={() => setHighlightIndex(i)}
+            onMouseDown={(ev) => {
+              ev.preventDefault();
+              applyInsert(s.insertText);
+              setCanvasMenuOpen(false);
+            }}
+          >
+             <span className="line-clamp-3 text-sm">{s.label}</span>
+          </button>
+        ))}
+      </div>
+    );
+  };
+
   return (
     <div ref={rootRef} className="relative flex-shrink-0">
-      {showDropdown ? (
-        <div
-          id={`${composerId}-canvas-suggestions`}
-          className="absolute bottom-full left-0 right-0 z-20 mb-1 max-h-[min(40vh,260px)] overflow-y-auto rounded-md border border-border bg-popover text-popover-foreground shadow-md"
-          role="listbox"
-          aria-label={showSlash ? 'Slash commands' : 'Questions you might ask'}
-        >
-          {showSlash ? (
-            <div className="p-1">
-              {filteredSlash.map((cmd, i) => (
-                <button
-                  key={`${cmd.fill}-${cmd.description}-${i}`}
-                  type="button"
-                  role="option"
-                  aria-selected={i === highlightIndex}
-                  className={cn(
-                    'flex w-full flex-col items-start gap-0.5 rounded-sm px-2 py-2 text-left text-xs',
-                    i === highlightIndex ? 'bg-accent text-accent-foreground' : 'hover:bg-muted/80',
-                  )}
-                  onMouseEnter={() => setHighlightIndex(i)}
-                  onMouseDown={(ev) => {
-                    ev.preventDefault();
-                    applyInsert(cmd.fill);
-                  }}
-                >
-                  <span className="font-mono text-[11px] font-medium">{cmd.fill.trim()}</span>
-                  <span className="text-muted-foreground">{cmd.description}</span>
-                </button>
-              ))}
-            </div>
-          ) : (
-            <div className="p-1">
-              <div className="px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                From your canvas
-              </div>
-              {nodeSuggestions.map((s, i) => (
-                <button
-                  key={s.id}
-                  type="button"
-                  role="option"
-                  aria-selected={i === highlightIndex}
-                  className={cn(
-                    'flex w-full flex-col items-start gap-0.5 rounded-sm px-2 py-2 text-left text-xs',
-                    i === highlightIndex ? 'bg-accent text-accent-foreground' : 'hover:bg-muted/80',
-                  )}
-                  onMouseEnter={() => setHighlightIndex(i)}
-                  onMouseDown={(ev) => {
-                    ev.preventDefault();
-                    applyInsert(s.insertText);
-                    setCanvasMenuOpen(false);
-                  }}
-                >
-                  <span className="line-clamp-3">{s.label}</span>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      ) : null}
+      {renderDropdownContent()}
 
       <div className="rounded-lg border border-border bg-background p-2 shadow-sm">
         {!showSlash ? (
           <button
             type="button"
-            className="mb-1 flex w-full items-center justify-between rounded-md px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground hover:bg-muted/60"
+            className="mb-1 flex w-full items-center justify-between rounded-md px-2 py-1.5 text-sm font-medium uppercase tracking-wide text-foreground/90 hover:bg-muted/60 dark:text-foreground/95"
             onClick={() => setCanvasMenuOpen((prev) => !prev)}
             aria-expanded={canvasMenuOpen}
             aria-controls={`${composerId}-canvas-suggestions`}
@@ -231,30 +233,37 @@ export function ChatComposerArea({
           </button>
         ) : null}
 
-        <div className="flex items-end gap-2">
-          <Textarea
-            ref={taRef}
-            id={composerId}
-            value={value}
-            onChange={(e) => onChange(e.target.value)}
-            onKeyDown={onKeyDown}
-            onFocus={() => setFocused(true)}
-            placeholder={placeholder}
-            disabled={disabled}
-            rows={2}
-            className="min-h-[44px] flex-1 resize-none border-0 bg-transparent px-2 py-1.5 text-sm shadow-none focus-visible:ring-0"
-          />
-          <Button
-            type="button"
-            onClick={onSend}
-            disabled={!value.trim() || isLoading || disabled}
-            size="icon"
-            variant="outline"
-            className="h-8 w-8 shrink-0 border-black bg-black text-white shadow-sm hover:bg-black/90 hover:text-white"
-            title="Send"
-          >
-            <ArrowUp className="h-4 w-4" />
-          </Button>
+        <div className="flex items-center gap-2">
+          <div className="bg-[#1e1f20] rounded-[28px] border border-white/5 flex items-center pr-2 flex-1">
+            <Textarea
+              ref={taRef}
+              id={composerId}
+              value={value}
+              onChange={(e) => onChange(e.target.value)}
+              onKeyDown={onKeyDown}
+              onFocus={() => setCanvasMenuOpen(false)}
+              placeholder="type / for skills..."
+              disabled={disabled}
+              rows={1}
+              className="flex-1 bg-transparent border-none focus:ring-0 text-gray-200 py-3 px-5 resize-none min-h-[48px] max-h-32 text-lg placeholder-gray-600 leading-relaxed"
+              onInput={(e) => {
+                  e.target.style.height = 'auto';
+                  e.target.style.height = e.target.scrollHeight + 'px';
+                }}
+            />
+            <button
+              type="button"
+              onClick={onSend}
+              disabled={!value.trim() || isLoading || disabled}
+              className={`p-3 rounded-full transition-all ${
+                value.trim()
+                  ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/20'
+                  : 'text-gray-500 hover:bg-white/5 cursor-not-allowed'
+              }`}
+            >
+              <Send size={20} />
+            </button>
+          </div>
         </div>
       </div>
     </div>

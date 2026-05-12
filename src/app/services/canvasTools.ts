@@ -15,9 +15,26 @@ export interface ToolResult {
 // Type for canvas node
 type CanvasNode = ReturnType<typeof useCanvasStore.getState>['getNodeById'] extends (...args: any[]) => infer R ? R : never;
 
-// Web Search Tool - calls server-side search API (DuckDuckGo)
-export async function webSearchTool(query: string): Promise<ToolResult> {
+function normalizeSearchQuery(input: unknown): string {
+  if (typeof input === 'string') return input.trim();
+  if (input && typeof input === 'object') {
+    const maybeQuery = (input as { query?: unknown }).query;
+    if (typeof maybeQuery === 'string') return maybeQuery.trim();
+  }
+  return '';
+}
+
+// Web Search Tool - calls server-side search API.
+export async function webSearchTool(queryInput: unknown): Promise<ToolResult> {
   try {
+    const query = normalizeSearchQuery(queryInput);
+    if (!query) {
+      return {
+        success: false,
+        error: 'Please provide a search query after /websearch.'
+      };
+    }
+
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 10000);
 

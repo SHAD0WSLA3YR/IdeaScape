@@ -4,7 +4,6 @@ import { Toolbar } from './components/Toolbar';
 import { MobileToolbar } from './components/MobileToolbar';
 import { MobileActionMenu } from './components/MobileActionMenu';
 import { DesktopChatButton } from './components/DesktopChatButton';
-import { SecondChatButton } from './components/SecondChatButton';
 import { EditableTitle } from './components/EditableTitle';
 import { HelpPanel } from './components/HelpPanel';
 import { UserCursors } from './components/UserCursors';
@@ -18,6 +17,7 @@ import { toast } from 'sonner';
 import { NodeSearchDialog } from './components/NodeSearchDialog';
 import { AISuggestionsPanel } from './components/AISuggestionsPanel';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { OfflineIndicator } from './components/OfflineIndicator';
 import { CommandPalette } from './components/CommandPalette';
 
 export default function App() {
@@ -388,6 +388,7 @@ export default function App() {
 
   return (
     <ErrorBoundary>
+      <OfflineIndicator />
       <div className="w-full h-screen relative overflow-hidden bg-gray-100 dark:bg-[#1a1d23]" ref={canvasContainerRef} data-infinite-canvas>
         <InfiniteCanvas />
         
@@ -409,7 +410,6 @@ export default function App() {
             <EditableTitle />
             <div className="flex space-x-2">
               <DesktopChatButton />
-              <SecondChatButton />
             </div>
           </>
         )}

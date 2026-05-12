@@ -103,7 +103,7 @@ function DraggableLink({
                     drop(node);
                 }
             }}
-            className={`border border-gray-200 rounded-lg p-2 ${isDragging ? 'opacity-50' : ''} ${
+            className={`border rounded-lg p-2 ${isDragging ? 'opacity-50' : ''} ${
                 isDragActive ? 'ring-2 ring-blue-200 border-blue-300 bg-blue-50/30 cursor-move' : 'cursor-default'
             } transition-all duration-300 transform-gpu`}
             style={{
@@ -124,7 +124,7 @@ function DraggableLink({
                         value={editUrl}
                         onChange={(e) => setEditUrl(e.target.value)}
                         placeholder="Enter URL..."
-                        className="w-full px-2 py-1 border border-gray-300 rounded text-xs"
+                        className="w-full px-2 py-1 border border-input bg-[var(--input-background)] rounded text-xs text-foreground"
                         autoFocus
                         onClick={(e) => e.stopPropagation()}
                         onFocus={(e) => e.stopPropagation()}
@@ -146,7 +146,7 @@ function DraggableLink({
                         value={editTitle}
                         onChange={(e) => setEditTitle(e.target.value)}
                         placeholder="Enter title (optional)..."
-                        className="w-full px-2 py-1 border border-gray-300 rounded text-xs"
+                        className="w-full px-2 py-1 border border-input bg-[var(--input-background)] rounded text-xs text-foreground"
                         onClick={(e) => e.stopPropagation()}
                         onFocus={(e) => e.stopPropagation()}
                         onKeyDown={(e) => {
@@ -175,7 +175,7 @@ function DraggableLink({
                                 e.stopPropagation();
                                 cancelEditing();
                             }}
-                            className="px-2 py-1 bg-gray-100 text-gray-700 rounded text-xs hover:bg-gray-200"
+                            className="px-2 py-1 bg-muted text-muted-foreground rounded text-xs hover:bg-muted/80"
                         >
                             Cancel
                         </Button>
@@ -210,7 +210,7 @@ function DraggableLink({
                             className={`cursor-pointer transition-colors ${
                                 isDragActive 
                                     ? 'text-blue-600 bg-blue-100 rounded p-1' 
-                                    : 'text-gray-400 hover:text-gray-600 p-1'
+                                    : 'text-muted-foreground hover:text-foreground p-1'
                             }`}
                             title={isDragActive ? "Click to deactivate drag mode" : "Click to activate drag mode"}
                         >
@@ -223,7 +223,7 @@ function DraggableLink({
                             className={`flex items-center gap-1 text-xs truncate flex-1 min-w-0 ${
                                 isDragActive 
                                     ? 'text-blue-500 pointer-events-none' 
-                                    : 'text-blue-600 hover:text-blue-800'
+                                    : 'text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300'
                             }`}
                             onClick={(e) => {
                                 e.stopPropagation();
@@ -246,8 +246,8 @@ function DraggableLink({
                             }}
                             className={`p-1 transition-colors ${
                                 isDragActive 
-                                    ? 'text-gray-300 cursor-not-allowed' 
-                                    : 'text-gray-500 hover:text-blue-600'
+                                    ? 'text-muted-foreground/50 cursor-not-allowed' 
+                                    : 'text-muted-foreground hover:text-blue-600 dark:hover:text-blue-400'
                             }`}
                             title={isDragActive ? "Deactivate drag mode to edit" : "Edit link"}
                             disabled={isDragActive}
@@ -263,8 +263,8 @@ function DraggableLink({
                             }}
                             className={`p-1 transition-colors ${
                                 isDragActive 
-                                    ? 'text-gray-300 cursor-not-allowed' 
-                                    : 'text-gray-500 hover:text-red-600'
+                                    ? 'text-muted-foreground/50 cursor-not-allowed' 
+                                    : 'text-muted-foreground hover:text-red-600 dark:hover:text-red-400'
                             }`}
                             title={isDragActive ? "Deactivate drag mode to delete" : "Delete link"}
                             disabled={isDragActive}
