@@ -15,6 +15,14 @@
 
 </div>
 
+<div align="center">
+
+![IdeaScape main workspace — infinite canvas with welcome card, groups panel, and controls](assets/readme-ui-screenshot.png)
+
+*Typical UI: canvas, welcome card, groups, and toolbars.*
+
+</div>
+
 ---
 
 ## 🧠 Core Features

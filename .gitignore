@@ -3,3 +3,6 @@ dist/
 .env
 .env.local
 .env.*.local
+
+# Vercel design-system reference (local only)
+DESIGN.md
