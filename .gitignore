@@ -11,3 +11,8 @@ DESIGN.md
 public/fonts/
 public/icon-192.svg
 public/icon-512.svg
+
+# Local tooling (not for repo)
+graph_*.py
+skills/
+graphify-out/
