@@ -13,6 +13,7 @@ import { GroupDialog } from './GroupDialog';
 import { SettingsPanel } from './SettingsPanel';
 import { NodeSearchDialog } from './NodeSearchDialog';
 import { CollaborationPanel } from './CollaborationPanel';
+import { useCollaborationStore } from '../stores/collaborationStore';
 
 import { toast } from 'sonner';
 import { toJpeg, toPng } from 'html-to-image';
@@ -20,6 +21,8 @@ import { jsPDF } from 'jspdf';
 
 export function Toolbar() {
   const collaborationEnabled = (import.meta as any)?.env?.VITE_ENABLE_COLLABORATION === 'true';
+  const { userRole } = useCollaborationStore();
+  const isCommenter = userRole === 'commenter';
   const {
     canvasName,
     groups,
@@ -486,7 +489,7 @@ export function Toolbar() {
                     <Upload className="w-4 h-4 mr-1" />
                     From Computer
                   </Button>
-                  <Button onClick={newCanvas} variant="outline">
+                  <Button onClick={newCanvas} variant="outline" disabled={isCommenter} title={isCommenter ? 'Read-only: cannot create new canvas' : 'Create new canvas'}>
                     New Canvas
                   </Button>
                 </div>
@@ -508,17 +511,15 @@ export function Toolbar() {
       <div className="border-t pt-3">
         {/* Collapsible Groups Section */}
         <Collapsible open={!groupsCollapsed} onOpenChange={(open) => setGroupsCollapsed(!open)}>
-          <div className="flex items-center justify-between mb-2">
-            <div className="flex items-center gap-2">
-              <Palette className="w-4 h-4" />
-              <span className="text-sm font-medium">Groups</span>
+          <CollapsibleTrigger asChild>
+            <div className="flex items-center justify-between mb-2 select-none hover:bg-accent rounded px-1 -mx-1 cursor-pointer transition-colors">
+              <div className="flex items-center gap-2">
+                <Palette className="w-4 h-4" />
+                <span className="text-sm font-medium">Groups</span>
+              </div>
+              {groupsCollapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
             </div>
-            <CollapsibleTrigger asChild>
-              <Button size="sm" variant="ghost" className="h-6 w-6 p-0">
-                {groupsCollapsed ? <ChevronRight className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-              </Button>
-            </CollapsibleTrigger>
-          </div>
+          </CollapsibleTrigger>
           
           <CollapsibleContent>
             <div className="space-y-2 max-h-32 overflow-y-auto mb-2">

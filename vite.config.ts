@@ -124,9 +124,8 @@ export default defineConfig(({ mode }) => {
           manualChunks(id) {
             if (!id.includes('node_modules')) return;
 
-            if (id.includes('@radix-ui') || id.includes('lucide-react')) {
-              return 'vendor-ui';
-            }
+            // radix-ui and lucide-react are merged into 'vendor' to avoid
+            // circular chunk warnings (vendor-ui imports from vendor)
 
             if (id.includes('recharts') || id.includes('d3-')) {
               return 'vendor-charts';
