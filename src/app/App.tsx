@@ -4,7 +4,6 @@ import { Toolbar } from './components/Toolbar';
 import { MobileToolbar } from './components/MobileToolbar';
 import { MobileActionMenu } from './components/MobileActionMenu';
 import { DesktopChatButton } from './components/DesktopChatButton';
-import { SecondChatButton } from './components/SecondChatButton';
 import { EditableTitle } from './components/EditableTitle';
 import { HelpPanel } from './components/HelpPanel';
 import { UserCursors } from './components/UserCursors';
@@ -56,8 +55,10 @@ export default function App() {
     isCollaborating,
     joinCanvas,
     updateCanvasData,
-    leaveCanvas
+    leaveCanvas,
+    userRole
   } = useCollaborationStore();
+  const isCommenter = userRole === 'commenter';
 
   const isMobile = useIsMobile();
   const [searchOpen, setSearchOpen] = useState(false);
@@ -207,37 +208,114 @@ export default function App() {
     setTheme(settings.theme);
   }, [settings.theme, setTheme]);
 
-  // Handle URL-based canvas sharing (DISABLED FOR DEMO)
-  useEffect(() => {
-    // Demo mode: Disable URL-based collaboration routing
-    console.log('🎭 Demo Mode: Collaboration URL routing disabled');
-    
-    // Just ensure title is set correctly
-    document.title = 'IdeaScape';
-  }, []);
+  // Refs for debounced sync and collision avoidance
+  const debounceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isActiveEditRef = useRef(false);
+  const lastBroadcastRef = useRef<string>('');
+  const collaborationCleanupRef = useRef<(() => void) | null>(null);
 
-  // Listen for real-time canvas updates from other users (DISABLED FOR DEMO)
-  useEffect(() => {
-    // Demo mode: Disable real-time collaboration events
-    console.log('🎭 Demo Mode: Real-time collaboration events disabled');
+  // Mark active edit for collision avoidance
+  const setActiveEdit = useCallback((active: boolean) => {
+    isActiveEditRef.current = active;
   }, []);
 
   // Get current canvas state for sync
   const { nodes, connections, groups } = useCanvasStore();
 
-  // Sync local changes to collaborative canvas (DISABLED FOR DEMO)
-  useEffect(() => {
-    // Demo mode: Disable canvas sync
-    if (isCollaborating) {
-      console.log('🎭 Demo Mode: Canvas sync disabled');
+  // Debounced sync to collaboration canvas (300ms)
+  const debouncedSync = useCallback(() => {
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
     }
-  }, [isCollaborating]);
+    debounceTimerRef.current = setTimeout(() => {
+      if (!isCollaborating || isActiveEditRef.current) return;
+      const snapshot = { nodes, connections, groups };
+      const snapshotJson = JSON.stringify(snapshot);
+      // Avoid broadcasting identical state
+      if (snapshotJson !== lastBroadcastRef.current) {
+        lastBroadcastRef.current = snapshotJson;
+        updateCanvasData(snapshot);
+      }
+    }, 300);
+  }, [isCollaborating, nodes, connections, groups, updateCanvasData]);
 
-  // Clean up collaboration on page unload (DISABLED FOR DEMO)
-  useEffect(() => {
-    // Demo mode: Disable collaboration cleanup
-    console.log('🎭 Demo Mode: Collaboration cleanup disabled');
+  // Replace snapshot equality check after remote updates
+  const resetLastBroadcast = useCallback(() => {
+    lastBroadcastRef.current = '';
   }, []);
+
+  // Handle URL-based canvas sharing
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const canvasId = params.get('canvas');
+    if (canvasId) {
+      joinCanvas(canvasId).then((result) => {
+        if (result.success) {
+          document.title = 'IdeaScape - Collaborating';
+        }
+      });
+    }
+    document.title = document.title || 'IdeaScape';
+  }, [joinCanvas]);
+
+  // Listen for real-time canvas updates from other users
+  useEffect(() => {
+    const handleCanvasUpdate = (event: Event) => {
+      const detail = (event as CustomEvent).detail;
+      if (detail?.nodes && detail?.connections) {
+        setNodes(detail.nodes);
+        setConnections(detail.connections);
+        if (detail.groups) setGroups(detail.groups);
+        // Reset last broadcast so next local sync doesn't get deduped
+        resetLastBroadcast();
+      }
+    };
+
+    if (typeof window !== 'undefined' && window.addEventListener) {
+      window.addEventListener('collaboration:canvas_update', handleCanvasUpdate);
+      return () => {
+        if (typeof window !== 'undefined' && window.removeEventListener) {
+          window.removeEventListener('collaboration:canvas_update', handleCanvasUpdate);
+        }
+      };
+    }
+  }, [setNodes, setConnections, setGroups, resetLastBroadcast]);
+
+  // Sync local changes to collaborative canvas with debounce
+  useEffect(() => {
+    if (isCollaborating) {
+      debouncedSync();
+    }
+    return () => {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
+    };
+  }, [isCollaborating, nodes, connections, groups, debouncedSync]);
+
+  // Clean up collaboration on page unload
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      if (isCollaborating) {
+        leaveCanvas();
+      }
+    };
+
+    if (typeof window !== 'undefined' && window.addEventListener) {
+      window.addEventListener('beforeunload', handleBeforeUnload);
+    }
+
+    return () => {
+      if (typeof window !== 'undefined' && window.removeEventListener) {
+        window.removeEventListener('beforeunload', handleBeforeUnload);
+      }
+      // Run stored cleanup
+      if (collaborationCleanupRef.current) {
+        collaborationCleanupRef.current();
+        collaborationCleanupRef.current = null;
+      }
+    };
+  }, [isCollaborating, leaveCanvas]);
 
   // Listen for search dialog open events from context menu
   useEffect(() => {
@@ -339,6 +417,7 @@ export default function App() {
               break;
             case 'g':
               e.preventDefault();
+              if (isCommenter) { toast.error('Read-only: cannot create groups'); break; }
               if (selectedNodeIds.length > 0 || selectedNodeId) {
                 groupSelectedNodes(); // Ctrl+G for group selected nodes
               } else {
@@ -347,6 +426,7 @@ export default function App() {
               break;
             case 'd':
               e.preventDefault();
+              if (isCommenter) { toast.error('Read-only: cannot duplicate'); break; }
               handleDuplicateNode(); // Ctrl+D for duplicate node
               break;
           }
@@ -354,6 +434,7 @@ export default function App() {
           switch (e.key.toLowerCase()) {
             case 'n':
               e.preventDefault();
+              if (isCommenter) { toast.error('Read-only: cannot add nodes'); break; }
               addNodeAtCenter(); // N for add node at center
               toast.success('New node added');
               break;
@@ -362,6 +443,7 @@ export default function App() {
               openGroupDialog(); // G for add group
               break;
             case 'delete':
+              if (isCommenter) { toast.error('Read-only: cannot delete'); break; }
               if (selectedNodeIds.length > 1) {
                 deleteNodes(selectedNodeIds);
                 toast.success(`${selectedNodeIds.length} nodes deleted`);
@@ -385,7 +467,18 @@ export default function App() {
         }
       };
     }
-  }, [deleteNode, deleteNodes, selectedNodeId, selectedNodeIds, undo, redo, handleSave, addNodeAtCenter, openGroupDialog, groupSelectedNodes, handleDuplicateNode, setSearchOpen]);
+  }, [deleteNode, deleteNodes, selectedNodeId, selectedNodeIds, undo, redo, handleSave, addNodeAtCenter, openGroupDialog, groupSelectedNodes, handleDuplicateNode, setSearchOpen, isCommenter]);
+
+  // Listen for role changes — clear subscriptions if demoted to commenter
+  useEffect(() => {
+    if (!isCollaborating) return;
+    if (isCommenter) {
+      console.log('🔇 Role changed to commenter — clearing collaboration broadcasts');
+      // Reset last broadcast so when/if re-promoted, sync resumes fresh
+      resetLastBroadcast();
+      toast.info('You now have read-only access');
+    }
+  }, [isCollaborating, isCommenter, resetLastBroadcast]);
 
   return (
     <ErrorBoundary>
@@ -409,10 +502,7 @@ export default function App() {
           <>
             <Toolbar />
             <EditableTitle />
-            <div className="flex space-x-2">
-              <DesktopChatButton />
-              <SecondChatButton />
-            </div>
+            <DesktopChatButton />
           </>
         )}
         

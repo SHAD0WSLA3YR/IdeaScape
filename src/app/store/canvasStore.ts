@@ -2,11 +2,7 @@ import { create } from 'zustand';
 import { DEFAULT_NVIDIA_MODEL, aiService, coerceNvidiaModel } from '../services/aiService';
 import { DEFAULT_CANVAS_DOCUMENT_ID, canUseIndexedDb, loadCanvasSnapshot, normalizeCanvasSnapshot, saveCanvasSnapshot } from '../services/canvasPersistence';
 import { createAISlice, initialAISuggestions, type AISlice } from '../../stores/slices/aiSlice';
-
-export interface Point {
-  x: number;
-  y: number;
-}
+import { useCollaborationStore } from '../stores/collaborationStore';
 
 export interface Node {
   id: string;
@@ -101,22 +97,76 @@ function persistCommandStatsToStorage(stats: Record<string, CommandUsageStat>) {
   }
 }
 
+const FLOATING_POSITION_KEY = 'ideascape-floating-position';
+const FLOATING_SIZE_KEY = 'ideascape-floating-size';
+
+export function loadFloatingPosition(): { x: number; y: number } | null {
+  if (typeof localStorage === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem(FLOATING_POSITION_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== 'object' || typeof (parsed as Record<string, unknown>).x !== 'number') return null;
+    return parsed as { x: number; y: number };
+  } catch {
+    return null;
+  }
+}
+
+export function saveFloatingPosition(position: { x: number; y: number }): void {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    localStorage.setItem(FLOATING_POSITION_KEY, JSON.stringify(position));
+  } catch {
+    // ignore quota / private mode
+  }
+}
+
+export function loadFloatingSize(): { width: number; height: number } | null {
+  if (typeof localStorage === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem(FLOATING_SIZE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== 'object' || typeof (parsed as Record<string, unknown>).width !== 'number') return null;
+    return parsed as { width: number; height: number };
+  } catch {
+    return null;
+  }
+}
+
+export function saveFloatingSize(size: { width: number; height: number }): void {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    localStorage.setItem(FLOATING_SIZE_KEY, JSON.stringify(size));
+  } catch {
+    // ignore quota / private mode
+  }
+}
+
 type CanvasHistorySnapshot = {
   nodes: Node[];
   connections: Connection[];
   groups: NodeGroup[];
+  /** Tags this snapshot with the user who created it, so collaborative undo/redo
+   *  only affects local changes. null = single-user mode (no filtering). */
+  userId: string | null;
 };
 
 /** Deep-clone history entries so `past` / `future` never share references with live state. */
 function cloneHistorySnapshot(snapshot: CanvasHistorySnapshot): CanvasHistorySnapshot {
+  let cloned: CanvasHistorySnapshot;
   try {
     if (typeof structuredClone === 'function') {
-      return structuredClone(snapshot) as CanvasHistorySnapshot;
+      cloned = structuredClone(snapshot) as CanvasHistorySnapshot;
+      // structuredClone may drop the userId field (not part of JSON roundtrip)
+      cloned.userId = snapshot.userId ?? null;
+      return cloned;
     }
   } catch {
     // structuredClone can throw on exotic values; canvas data should be plain data
   }
-  return {
+  cloned = {
     nodes: snapshot.nodes.map((node) => ({
       ...node,
       createdAt: new Date(node.createdAt),
@@ -131,7 +181,9 @@ function cloneHistorySnapshot(snapshot: CanvasHistorySnapshot): CanvasHistorySna
     })),
     connections: snapshot.connections.map((c) => ({ ...c })),
     groups: snapshot.groups.map((g) => ({ ...g, nodes: [...g.nodes] })),
+    userId: snapshot.userId ?? null,
   };
+  return cloned;
 }
 
 interface CanvasState {
@@ -147,9 +199,9 @@ interface CanvasState {
   isConnecting: boolean;
   connectingFromNodeId: string | null;
   history: {
-    past: Array<{ nodes: Node[]; connections: Connection[]; groups: NodeGroup[] }>;
-    present: { nodes: Node[]; connections: Connection[]; groups: NodeGroup[] };
-    future: Array<{ nodes: Node[]; connections: Connection[]; groups: NodeGroup[] }>;
+    past: CanvasHistorySnapshot[];
+    present: CanvasHistorySnapshot;
+    future: CanvasHistorySnapshot[];
   };
   settings: {
     theme: 'light' | 'dark' | 'system';
@@ -313,7 +365,7 @@ const initialState: CanvasState = {
   connectingFromNodeId: null,
   history: {
     past: [],
-    present: { nodes: [], connections: [], groups: [] },
+    present: { nodes: [], connections: [], groups: [], userId: null },
     future: [],
   },
   settings: {
@@ -331,6 +383,28 @@ const initialState: CanvasState = {
   commandStats: loadCommandStatsFromStorage(),
 };
 
+/**
+ * Guard mutation if the current user has read-only (commenter) role.
+ * Throws to prevent state changes. Intended for data-layer protection.
+ */
+function guardMutation(): void {
+  const state = useCollaborationStore.getState();
+  if ((state as any).userRole === 'commenter') {
+    throw new Error('Read-only access: you do not have permission to modify the canvas.');
+  }
+}
+
+/**
+ * Guard deletion of a node that is currently being edited by another collaborator.
+ */
+function guardNodeNotFocused(nodeId: string): void {
+  const state = useCollaborationStore.getState();
+  const focused: Set<string> | undefined = (state as any).focusedNodesByOthers;
+  if (focused?.has(nodeId)) {
+    throw new Error('Cannot delete: another user is currently editing this node.');
+  }
+}
+
 export const useCanvasStore = create<CanvasState & CanvasActions & AISlice>((set, get) => ({
   ...initialState,
 
@@ -342,24 +416,18 @@ export const useCanvasStore = create<CanvasState & CanvasActions & AISlice>((set
   },
 
   clearCanvas: () => {
-    set(state => {
-      const newState = {
-        ...state,
-        nodes: [],
-        connections: [],
-        selectedNodeId: null,
-      };
-      
-      newState.history.past.push(cloneHistorySnapshot(state.history.present));
-      newState.history.present = {
-        nodes: [],
-        connections: [],
-        groups: newState.groups,
-      };
-      newState.history.future = [];
-      
-      return newState;
-    });
+    guardMutation();
+    get().saveToHistory();
+    set(state => ({
+      ...state,
+      nodes: [],
+      connections: [],
+      selectedNodeId: null,
+      history: {
+        ...state.history,
+        present: { nodes: [], connections: [], groups: state.groups },
+      },
+    }));
   },
 
   addNode: (x, y) => {
@@ -380,21 +448,22 @@ export const useCanvasStore = create<CanvasState & CanvasActions & AISlice>((set
       updatedAt: now,
     };
     
-    set(state => {
-      const newState = { ...state, nodes: [...state.nodes, newNode] };
-      newState.history.past.push(cloneHistorySnapshot(state.history.present));
-      newState.history.present = {
-        nodes: newState.nodes,
-        connections: newState.connections,
-        groups: newState.groups,
-      };
-      newState.history.future = [];
-      
-      // Auto-save after adding node
-      scheduleAutoSave(get, 100);
-      
-      return newState;
-    });
+    get().saveToHistory();
+    set(state => ({
+      ...state,
+      nodes: [...state.nodes, newNode],
+      history: {
+        ...state.history,
+        present: {
+          nodes: [...state.nodes, newNode],
+          connections: state.connections,
+          groups: state.groups,
+        },
+      },
+    }));
+    
+    // Auto-save after adding node
+    scheduleAutoSave(get, 100);
     
     // Remove the isNew flag after animation duration
     setTimeout(() => {
@@ -444,18 +513,21 @@ export const useCanvasStore = create<CanvasState & CanvasActions & AISlice>((set
       isPinned: true,
     };
 
-    set((s) => {
-      const newState = { ...s, nodes: [...s.nodes, newNode] };
-      newState.history.past.push(cloneHistorySnapshot(s.history.present));
-      newState.history.present = {
-        nodes: newState.nodes,
-        connections: newState.connections,
-        groups: newState.groups,
-      };
-      newState.history.future = [];
-      scheduleAutoSave(get, 100);
-      return newState;
-    });
+    get().saveToHistory();
+    set((s) => ({
+      ...s,
+      nodes: [...s.nodes, newNode],
+      history: {
+        ...s.history,
+        present: {
+          nodes: [...s.nodes, newNode],
+          connections: s.connections,
+          groups: s.groups,
+        },
+      },
+    }));
+
+    scheduleAutoSave(get, 100);
 
     setTimeout(() => {
       get().updateNode(newNode.id, { isNew: false });
@@ -498,21 +570,22 @@ export const useCanvasStore = create<CanvasState & CanvasActions & AISlice>((set
       updatedAt: now,
     };
     
-    set(state => {
-      const newState = { ...state, nodes: [...state.nodes, newNode] };
-      newState.history.past.push(cloneHistorySnapshot(state.history.present));
-      newState.history.present = {
-        nodes: newState.nodes,
-        connections: newState.connections,
-        groups: newState.groups,
-      };
-      newState.history.future = [];
-      
-      // Auto-save after duplicating node
-      scheduleAutoSave(get, 100);
-      
-      return newState;
-    });
+    get().saveToHistory();
+    set(state => ({
+      ...state,
+      nodes: [...state.nodes, newNode],
+      history: {
+        ...state.history,
+        present: {
+          nodes: [...state.nodes, newNode],
+          connections: state.connections,
+          groups: state.groups,
+        },
+      },
+    }));
+    
+    // Auto-save after duplicating node
+    scheduleAutoSave(get, 100);
     
     // Remove the isNew flag after animation duration
     setTimeout(() => {
@@ -537,33 +610,37 @@ export const useCanvasStore = create<CanvasState & CanvasActions & AISlice>((set
   },
 
   deleteNode: (id) => {
+    guardMutation();
+    guardNodeNotFocused(id);
+    get().saveToHistory();
     set(state => {
-      const newState = {
+      const filteredNodes = state.nodes.filter(node => node.id !== id);
+      const filteredConns = state.connections.filter(
+        conn => conn.fromNodeId !== id && conn.toNodeId !== id
+      );
+      const updatedGroups = state.groups.map(group => ({
+        ...group,
+        nodes: group.nodes.filter(nodeId => nodeId !== id),
+      }));
+      return {
         ...state,
-        nodes: state.nodes.filter(node => node.id !== id),
-        connections: state.connections.filter(
-          conn => conn.fromNodeId !== id && conn.toNodeId !== id
-        ),
-        groups: state.groups.map(group => ({
-          ...group,
-          nodes: group.nodes.filter(nodeId => nodeId !== id),
-        })),
+        nodes: filteredNodes,
+        connections: filteredConns,
+        groups: updatedGroups,
         selectedNodeId: state.selectedNodeId === id ? null : state.selectedNodeId,
+        history: {
+          ...state.history,
+          present: {
+            nodes: filteredNodes,
+            connections: filteredConns,
+            groups: updatedGroups,
+          },
+        },
       };
-      
-      newState.history.past.push(cloneHistorySnapshot(state.history.present));
-      newState.history.present = {
-        nodes: newState.nodes,
-        connections: newState.connections,
-        groups: newState.groups,
-      };
-      newState.history.future = [];
-      
-      // Auto-save after deleting node
-      scheduleAutoSave(get, 100);
-      
-      return newState;
     });
+    
+    // Auto-save after deleting node
+    scheduleAutoSave(get, 100);
   },
 
   selectNode: (id) => {
@@ -603,34 +680,38 @@ export const useCanvasStore = create<CanvasState & CanvasActions & AISlice>((set
   },
 
   deleteNodes: (ids) => {
+    guardMutation();
+    ids.forEach(id => guardNodeNotFocused(id));
+    get().saveToHistory();
     set(state => {
-      const newState = {
+      const filteredNodes = state.nodes.filter(node => !ids.includes(node.id));
+      const filteredConns = state.connections.filter(
+        conn => !ids.includes(conn.fromNodeId) && !ids.includes(conn.toNodeId)
+      );
+      const updatedGroups = state.groups.map(group => ({
+        ...group,
+        nodes: group.nodes.filter(nodeId => !ids.includes(nodeId)),
+      }));
+      return {
         ...state,
-        nodes: state.nodes.filter(node => !ids.includes(node.id)),
-        connections: state.connections.filter(
-          conn => !ids.includes(conn.fromNodeId) && !ids.includes(conn.toNodeId)
-        ),
-        groups: state.groups.map(group => ({
-          ...group,
-          nodes: group.nodes.filter(nodeId => !ids.includes(nodeId)),
-        })),
+        nodes: filteredNodes,
+        connections: filteredConns,
+        groups: updatedGroups,
         selectedNodeId: null,
         selectedNodeIds: [],
+        history: {
+          ...state.history,
+          present: {
+            nodes: filteredNodes,
+            connections: filteredConns,
+            groups: updatedGroups,
+          },
+        },
       };
-      
-      newState.history.past.push(cloneHistorySnapshot(state.history.present));
-      newState.history.present = {
-        nodes: newState.nodes,
-        connections: newState.connections,
-        groups: newState.groups,
-      };
-      newState.history.future = [];
-      
-      // Auto-save after deleting nodes
-      scheduleAutoSave(get, 100);
-      
-      return newState;
     });
+    
+    // Auto-save after deleting nodes
+    scheduleAutoSave(get, 100);
   },
 
   addConnection: (fromNodeId, toNodeId, fromPoint, toPoint) => {
@@ -653,41 +734,42 @@ export const useCanvasStore = create<CanvasState & CanvasActions & AISlice>((set
       color: '#000000',
     };
 
-    set(state => {
-      const newState = {
-        ...state,
-        connections: [...state.connections, newConnection],
-        isConnecting: false,
-        connectingFromNodeId: null,
-      };
-      newState.history.past.push(cloneHistorySnapshot(state.history.present));
-      newState.history.present = {
-        nodes: newState.nodes,
-        connections: newState.connections,
-        groups: newState.groups,
-      };
-      newState.history.future = [];
-      return newState;
-    });
+    get().saveToHistory();
+    set(state => ({
+      ...state,
+      connections: [...state.connections, newConnection],
+      isConnecting: false,
+      connectingFromNodeId: null,
+      history: {
+        ...state.history,
+        present: {
+          nodes: state.nodes,
+          connections: [...state.connections, newConnection],
+          groups: state.groups,
+        },
+      },
+    }));
     
     // Auto-save after adding connection
     scheduleAutoSave(get, 100);
   },
 
   deleteConnection: (id) => {
+    get().saveToHistory();
     set(state => {
-      const newState = {
+      const filteredConns = state.connections.filter(conn => conn.id !== id);
+      return {
         ...state,
-        connections: state.connections.filter(conn => conn.id !== id),
+        connections: filteredConns,
+        history: {
+          ...state.history,
+          present: {
+            nodes: state.nodes,
+            connections: filteredConns,
+            groups: state.groups,
+          },
+        },
       };
-      newState.history.past.push(cloneHistorySnapshot(state.history.present));
-      newState.history.present = {
-        nodes: newState.nodes,
-        connections: newState.connections,
-        groups: newState.groups,
-      };
-      newState.history.future = [];
-      return newState;
     });
     
     // Auto-save after deleting connection
@@ -940,14 +1022,28 @@ export const useCanvasStore = create<CanvasState & CanvasActions & AISlice>((set
   },
 
   undo: () => {
+    // In collaboration mode, get the current userId to filter local-only entries
+    let currentUserId: string | null = null;
+    try { currentUserId = (useCollaborationStore.getState() as any).currentUserId ?? null; } catch {}
+
     set(state => {
       if (state.history.past.length === 0) return state;
-      
-      const previous = state.history.past[state.history.past.length - 1];
-      const newPast = state.history.past.slice(0, -1);
+
+      // Find the most recent past entry matching current user (or any entry if single-user)
+      let targetIdx = state.history.past.length - 1;
+      if (currentUserId) {
+        while (targetIdx >= 0 && state.history.past[targetIdx].userId !== currentUserId) {
+          targetIdx--;
+        }
+        if (targetIdx < 0) return state; // no local entry to undo
+      }
+
+      const previous = state.history.past[targetIdx];
+      const newPast = state.history.past.slice(0, targetIdx);
       const restored = cloneHistorySnapshot(previous);
       const currentForFuture = cloneHistorySnapshot(state.history.present);
-      
+      currentForFuture.userId = currentUserId;
+
       return {
         ...state,
         nodes: restored.nodes,
@@ -967,14 +1063,27 @@ export const useCanvasStore = create<CanvasState & CanvasActions & AISlice>((set
   },
 
   redo: () => {
+    // In collaboration mode, get the current userId to filter local-only entries
+    let currentUserId: string | null = null;
+    try { currentUserId = (useCollaborationStore.getState() as any).currentUserId ?? null; } catch {}
+
     set(state => {
       if (state.history.future.length === 0) return state;
-      
-      const next = state.history.future[0];
-      const newFuture = state.history.future.slice(1);
+
+      // Find the first future entry matching current user (or any entry if single-user)
+      let targetIdx = 0;
+      if (currentUserId) {
+        while (targetIdx < state.history.future.length && state.history.future[targetIdx].userId !== currentUserId) {
+          targetIdx++;
+        }
+        if (targetIdx >= state.history.future.length) return state; // no local entry to redo
+      }
+
+      const next = state.history.future[targetIdx];
+      const newFuture = state.history.future.filter((_, i) => i !== targetIdx);
       const applied = cloneHistorySnapshot(next);
       const presentForPast = cloneHistorySnapshot(state.history.present);
-      
+
       return {
         ...state,
         nodes: applied.nodes,
@@ -994,18 +1103,33 @@ export const useCanvasStore = create<CanvasState & CanvasActions & AISlice>((set
   },
 
   saveToHistory: () => {
-    set(state => ({
-      ...state,
-      history: {
-        past: [...state.history.past, cloneHistorySnapshot(state.history.present)],
-        present: {
-          nodes: state.nodes,
-          connections: state.connections,
-          groups: state.groups,
+    // Get current userId for collaborative tagging (null in single-user mode)
+    let currentUserId: string | null = null;
+    try {
+      const collab = useCollaborationStore.getState();
+      currentUserId = (collab as unknown as Record<string, unknown>).currentUserId as string ?? null;
+    } catch {
+      // collaboration store not available — single-user mode
+    }
+
+    set(state => {
+      const presentSnapshot: CanvasHistorySnapshot = {
+        ...cloneHistorySnapshot(state.history.present),
+        userId: currentUserId,
+      };
+      return {
+        ...state,
+        history: {
+          past: [...state.history.past, presentSnapshot],
+          present: {
+            nodes: state.nodes,
+            connections: state.connections,
+            groups: state.groups,
+          },
+          future: [],
         },
-        future: [],
-      },
-    }));
+      };
+    });
   },
 
   exportCanvas: () => {
@@ -1672,14 +1796,8 @@ export const useCanvasStore = create<CanvasState & CanvasActions & AISlice>((set
   ...createAISlice(set as any, get as any),
 
   autoOrganizeNodes: () => {
+    get().saveToHistory();
     set(state => {
-      // Save snapshot before making changes (for undo)
-      const snapshot = cloneHistorySnapshot({
-        nodes: state.nodes,
-        connections: state.connections,
-        groups: state.groups,
-      });
-
       // Only organize selected nodes, or if none selected, don't do anything
       let nodesToOrganize: Node[] = [];
       if (state.selectedNodeIds.length > 0) {
@@ -1982,13 +2100,11 @@ export const useCanvasStore = create<CanvasState & CanvasActions & AISlice>((set
         nodes: organizedNodes,
         history: {
           ...state.history,
-          past: [...state.history.past, snapshot],
           present: {
             nodes: organizedNodes,
             connections: state.connections,
             groups: state.groups,
           },
-          future: [],
         },
       };
     });
