@@ -26,6 +26,8 @@ interface CollaborativeCanvas {
   maxParticipants: number;
 }
 
+type CanvasRole = 'editor' | 'commenter' | null;
+
 interface CollaborationState {
   // Connection state
   isConnected: boolean;
@@ -37,8 +39,14 @@ interface CollaborationState {
   collaborativeCanvas: CollaborativeCanvas | null;
   participants: UserPresence[];
   
+  // Permission state
+  userRole: CanvasRole;
+  focusedNodesByOthers: Set<string>;
+  
   // Real-time updates
   realtimeChannel: any;
+  /** @internal 10-second heartbeat timer for presence refresh */
+  _heartbeatTimer: ReturnType<typeof setInterval> | null;
   
   // Actions
   generateUserId: () => string;
@@ -69,7 +77,10 @@ export const useCollaborationStore = create<CollaborationState>()(
     currentUserId: null,
     collaborativeCanvas: null,
     participants: [],
+    userRole: null,
+    focusedNodesByOthers: new Set(),
     realtimeChannel: null,
+    _heartbeatTimer: null,
 
     // Generate unique user ID
     generateUserId: () => {
@@ -205,14 +216,32 @@ export const useCollaborationStore = create<CollaborationState>()(
         console.log('📦 Response data:', result);
 
         if (result.success) {
+          // Detect user role from canvas metadata (server determines editor vs commenter)
+          const userRoleFromServer: CanvasRole = result.canvas?.userRole ?? result.role ?? 'editor';
+
           set({
             isCollaborating: true,
             currentCanvasId: canvasId,
-            collaborativeCanvas: result.canvas
+            collaborativeCanvas: result.canvas,
+            userRole: userRoleFromServer
           });
+
+          console.log(`🔑 User role: ${userRoleFromServer}`);
 
           // Subscribe to real-time updates
           get().subscribeToCanvas(canvasId);
+          
+          // Start 10-second presence heartbeat
+          const timer = setInterval(() => {
+            try {
+              const state = get();
+              if (!state.isCollaborating || !state.currentCanvasId) return;
+              state.updatePresence({ lastSeen: new Date().toISOString() });
+            } catch (err) {
+              console.warn('Presence heartbeat failed:', err);
+            }
+          }, 10_000);
+          set({ _heartbeatTimer: timer });
           
           console.log('✅ Successfully joined canvas:', canvasId);
           return { success: true };
@@ -233,9 +262,14 @@ export const useCollaborationStore = create<CollaborationState>()(
 
     // Leave the current canvas
     leaveCanvas: async () => {
-      const { currentCanvasId, currentUserId } = get();
+      const { currentCanvasId, currentUserId, _heartbeatTimer } = get();
       
       if (!currentCanvasId || !currentUserId) return;
+
+      // Clear presence heartbeat
+      if (_heartbeatTimer) {
+        clearInterval(_heartbeatTimer);
+      }
 
       try {
         await fetch(`${API_BASE}/canvas/${currentCanvasId}/leave`, {
@@ -254,7 +288,10 @@ export const useCollaborationStore = create<CollaborationState>()(
           isCollaborating: false,
           currentCanvasId: null,
           collaborativeCanvas: null,
-          participants: []
+          participants: [],
+          userRole: null,
+          focusedNodesByOthers: new Set(),
+          _heartbeatTimer: null
         });
 
         console.log('✅ Left canvas');
@@ -372,6 +409,29 @@ export const useCollaborationStore = create<CollaborationState>()(
             participants: state.participants.filter(p => p.userId !== payload.payload.userId)
           }));
         })
+        // Track nodes focused by remote users (for deletion guard)
+        .on('broadcast', { event: 'node_focus' }, (payload) => {
+          const { userId, nodeId } = payload.payload ?? {};
+          if (!userId || !nodeId) return;
+          const { currentUserId } = get();
+          if (userId === currentUserId) return; // ignore own focus
+          set((state) => {
+            const next = new Set(state.focusedNodesByOthers);
+            next.add(nodeId);
+            return { focusedNodesByOthers: next };
+          });
+        })
+        .on('broadcast', { event: 'node_blur' }, (payload) => {
+          const { userId, nodeId } = payload.payload ?? {};
+          if (!userId || !nodeId) return;
+          const { currentUserId } = get();
+          if (userId === currentUserId) return;
+          set((state) => {
+            const next = new Set(state.focusedNodesByOthers);
+            next.delete(nodeId);
+            return { focusedNodesByOthers: next };
+          });
+        })
         .subscribe((status) => {
           if (status === 'SUBSCRIBED') {
             console.log('✅ Subscribed to canvas real-time updates');
@@ -387,11 +447,16 @@ export const useCollaborationStore = create<CollaborationState>()(
 
     // Unsubscribe from real-time updates
     unsubscribeFromCanvas: () => {
-      const { realtimeChannel } = get();
+      const { realtimeChannel, _heartbeatTimer } = get();
+      
+      // Clear presence heartbeat
+      if (_heartbeatTimer) {
+        clearInterval(_heartbeatTimer);
+      }
       
       if (realtimeChannel) {
         realtimeChannel.unsubscribe();
-        set({ realtimeChannel: null, isConnected: false });
+        set({ realtimeChannel: null, isConnected: false, _heartbeatTimer: null });
         console.log('✅ Unsubscribed from canvas updates');
       }
     },
