@@ -161,7 +161,7 @@ export function ChatComposerArea({
 
     if (showSlash) {
       return (
-        <div className="bg-[#2a2b2c] rounded-xl border border-white/10 shadow-xl p-1">
+      <div className="bg-popover rounded-xl border border-border shadow-xl p-1">
           {filteredSlash.map((cmd, i) => (
             <button
               key={`${cmd.fill}-${cmd.description}-${i}`}
@@ -187,10 +187,7 @@ export function ChatComposerArea({
     }
 
     return (
-      <div className="bg-[#2a2b2c] rounded-xl border border-white/10 shadow-xl p-1">
-        <div className="px-2 py-1.5 text-sm font-medium uppercase tracking-wide text-foreground/90 dark:text-foreground/95">
-          From your canvas
-        </div>
+      <div className="bg-popover rounded-xl border border-border shadow-xl p-1">
         {nodeSuggestions.map((s, i) => (
           <button
             key={s.id}
@@ -219,14 +216,13 @@ export function ChatComposerArea({
     <div ref={rootRef} className="relative flex-shrink-0">
       {renderDropdownContent()}
 
-      <div className="rounded-lg border border-border bg-background p-2 shadow-sm">
+      <div className="rounded-lg bg-background shadow-sm">
         {!showSlash ? (
           <button
             type="button"
             className="mb-1 flex w-full items-center justify-between rounded-md px-2 py-1.5 text-sm font-medium uppercase tracking-wide text-foreground/90 hover:bg-muted/60 dark:text-foreground/95"
             onClick={() => setCanvasMenuOpen((prev) => !prev)}
             aria-expanded={canvasMenuOpen}
-            aria-controls={`${composerId}-canvas-suggestions`}
           >
             <span>From your canvas</span>
             <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', canvasMenuOpen ? 'rotate-180' : '')} />
@@ -234,7 +230,7 @@ export function ChatComposerArea({
         ) : null}
 
         <div className="flex items-center gap-2">
-          <div className="bg-[#1e1f20] rounded-[28px] border border-white/5 flex items-center pr-2 flex-1">
+          <div className="bg-muted/30 border border-border rounded-lg flex items-center pr-2 flex-1">
             <Textarea
               ref={taRef}
               id={composerId}
@@ -245,7 +241,7 @@ export function ChatComposerArea({
               placeholder="type / for skills..."
               disabled={disabled}
               rows={1}
-              className="flex-1 bg-transparent border-none focus:ring-0 text-gray-200 py-3 px-5 resize-none min-h-[48px] max-h-32 text-lg placeholder-gray-600 leading-relaxed"
+              className="flex-1 bg-transparent border-none focus:ring-0 focus-visible:ring-0 text-foreground py-3 px-4 resize-none min-h-[48px] max-h-32 text-[14px] placeholder:text-muted-foreground leading-relaxed"
               onInput={(e) => {
                   e.target.style.height = 'auto';
                   e.target.style.height = e.target.scrollHeight + 'px';
@@ -257,7 +253,7 @@ export function ChatComposerArea({
               disabled={!value.trim() || isLoading || disabled}
               className={`p-3 rounded-full transition-all ${
                 value.trim()
-                  ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/20'
+                  ? 'bg-black text-white shadow-lg shadow-black/20'
                   : 'text-gray-500 hover:bg-white/5 cursor-not-allowed'
               }`}
             >

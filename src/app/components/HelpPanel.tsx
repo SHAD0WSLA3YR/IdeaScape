@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from './ui/dialog';
 import { Badge } from './ui/badge';
-import { Keyboard, Save, Plus, Users, Undo2, Redo2, Trash, ChevronUp, ChevronDown, HelpCircle, Search, Copy, Type, Image, Link, Video, MessageCircle, Tag, Sparkles, Wand2 } from 'lucide-react';
+import { Keyboard, Save, Plus, Users, Undo2, Redo2, Trash, ChevronUp, ChevronDown, HelpCircle, Search, Copy, Type, Image, Link, Video, MessageCircle, Tag, Sparkles, Wand2, Command, Move, MousePointer2, GitBranch } from 'lucide-react';
 
 export function HelpPanel() {
   const [expanded, setExpanded] = useState(false);
@@ -35,18 +35,49 @@ export function HelpPanel() {
         { keys: ['Ctrl', 'F'], description: 'Search nodes' },
         { keys: ['Ctrl', 'G'], description: 'Group selected nodes' },
       ]
+    },
+    {
+      category: 'Command Palette',
+      icon: <Command className="w-4 h-4" />,
+      items: [
+        { keys: ['Ctrl', 'K'], description: 'Open command palette' },
+      ]
     }
   ];
 
   const mouseControls = [
-    'Double-click empty area: Create new node',
-    'Click + drag empty area: Select multiple nodes',
-    'Click blue dot: Start connection',
-    'Click target node: Complete connection',
-    'Ctrl+scroll: Zoom in/out (cursor-based)',
-    'Middle-click drag: Pan canvas',
-    'Right-click: Context menu (node/canvas options)',
-    'ESC: Cancel connection or close dialogs'
+    {
+      category: 'Canvas Navigation',
+      color: 'blue',
+      icon: <Move className="w-3 h-3 text-blue-600 dark:text-blue-400" />,
+      items: [
+        'Middle-click drag: Pan across the canvas',
+        'Ctrl+scroll: Zoom in/out at cursor position',
+        'Scroll wheel: Pan canvas vertically'
+      ]
+    },
+    {
+      category: 'Selection & Editing',
+      color: 'green',
+      icon: <MousePointer2 className="w-3 h-3 text-green-600 dark:text-green-400" />,
+      items: [
+        'Double-click empty area: Create new node',
+        'Click + drag empty area: Select multiple nodes',
+        'Drag-drop nodes: Reposition any node on canvas',
+        'Right-click: Context menu (node or canvas options)',
+        'ESC: Cancel connection or close dialogs'
+      ]
+    },
+    {
+      category: 'Connections & Context',
+      color: 'purple',
+      icon: <GitBranch className="w-3 h-3 text-purple-600 dark:text-purple-400" />,
+      items: [
+        'Click blue dot: Start a new connection',
+        'Click target node: Complete the connection',
+        'Click a connection: Select and inspect it',
+      ]
+    }
   ];
 
   const nodeFeatures = [
@@ -57,7 +88,8 @@ export function HelpPanel() {
         'Text: Rich text editing with formatting',
         'Image: Drag & drop or paste images',
         'Link: Multiple URLs with previews',
-        'Video: Drag & drop video files'
+        'Video: Drag & drop video files',
+        'Browser: Interactive web sessions within nodes'
       ]
     },
     {
@@ -120,6 +152,8 @@ export function HelpPanel() {
                   <li>• Drag select: Multi-select</li>
                   <li>• Right-click: Context menu</li>
                   <li>• Ctrl+scroll: Zoom to cursor</li>
+                  <li>• Middle-click drag: Pan canvas</li>
+                  <li>• Click blue dot: Start connection</li>
                 </ul>
               </div>
               
@@ -167,12 +201,31 @@ export function HelpPanel() {
                 </div>
                 Mouse Controls
               </h3>
-              <div className="space-y-2 ml-8">
-                {mouseControls.map((control, index) => (
-                  <div key={index} className="text-sm text-gray-600 dark:text-gray-400">
-                    • {control}
-                  </div>
-                ))}
+              <div className="space-y-4 ml-7">
+                {mouseControls.map((group) => {
+                  const bgColorMap: Record<string, string> = {
+                    blue: 'bg-blue-100 dark:bg-blue-900',
+                    green: 'bg-green-100 dark:bg-green-900',
+                    purple: 'bg-purple-100 dark:bg-purple-900',
+                  };
+                  return (
+                    <div key={group.category}>
+                      <div className="flex items-center gap-2 mb-2">
+                        <div className={`w-6 h-6 ${bgColorMap[group.color]} rounded-full flex items-center justify-center`}>
+                          {group.icon}
+                        </div>
+                        <h4 className="font-medium text-sm">{group.category}</h4>
+                      </div>
+                      <div className="space-y-1 ml-8">
+                        {group.items.map((item, index) => (
+                          <div key={index} className="text-sm text-gray-600 dark:text-gray-400">
+                            • {item}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
 
