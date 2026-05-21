@@ -214,11 +214,6 @@ export default function App() {
   const lastBroadcastRef = useRef<string>('');
   const collaborationCleanupRef = useRef<(() => void) | null>(null);
 
-  // Mark active edit for collision avoidance
-  const setActiveEdit = useCallback((active: boolean) => {
-    isActiveEditRef.current = active;
-  }, []);
-
   // Get current canvas state for sync
   const { nodes, connections, groups } = useCanvasStore();
 
