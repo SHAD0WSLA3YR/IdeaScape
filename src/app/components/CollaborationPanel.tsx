@@ -36,7 +36,7 @@ export function CollaborationPanel({ isOpen, onClose, canvasData }: Collaboratio
     getCurrentUser
   } = useCollaborationStore();
 
-  // Create a new collaborative canvas (Demo Mode)
+  // Create a new collaborative canvas
   const handleCreateCanvas = async () => {
     if (!canvasName.trim()) {
       toast.error('Please enter a canvas name');
@@ -44,27 +44,26 @@ export function CollaborationPanel({ isOpen, onClose, canvasData }: Collaboratio
     }
 
     setIsCreating(true);
-    
+
     try {
-      // Demo mode: Show success message without creating actual collaboration
-      await new Promise(resolve => setTimeout(resolve, 2000)); // Simulate loading
-      
-      toast.success('Demo: Collaborative canvas simulated!', {
-        description: 'This is a preview of the collaboration feature',
-        duration: 5000
-      });
-      
-      // For demo purposes, show the panel as if collaboration started
-      setShareUrl('https://ideascape.app/canvas/demo-collaboration-url');
-      
+      const result = await createCollaborativeCanvas(canvasName.trim(), canvasData ?? { nodes: [], connections: [], groups: [] });
+
+      if (result.success && result.canvasId) {
+        setShareUrl(getShareableUrl(result.canvasId));
+        toast.success('Collaborative canvas created!', {
+          description: 'Share the URL to invite others.',
+          duration: 5000
+        });
+      } else {
+        toast.error(result.error || 'Failed to create collaborative canvas');
+      }
     } catch (error) {
-      console.error('Demo error:', error);
-      toast.error('Demo simulation failed');
+      console.error('Error creating canvas:', error);
+      toast.error('Failed to create canvas. Please try again.');
     } finally {
       setIsCreating(false);
     }
   };
-
 
 
   // Leave the current collaborative session
@@ -103,19 +102,16 @@ export function CollaborationPanel({ isOpen, onClose, canvasData }: Collaboratio
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Users className="w-5 h-5" />
-            Real-time Collaboration
-            <Badge variant="outline" className="text-xs bg-blue-50 text-blue-600 border-blue-200">
-              Coming Soon
-            </Badge>
-          </DialogTitle>
-          <DialogDescription>
-            {isCollaborating 
-              ? 'You\'re currently in a collaborative session. Share the URL to invite others.'
-              : 'Create a shareable canvas for real-time collaboration with up to 2 people.'
-            }
-          </DialogDescription>
+            <DialogTitle className="flex items-center gap-2">
+              <Users className="w-5 h-5" />
+              Real-time Collaboration
+            </DialogTitle>
+            <DialogDescription>
+              {isCollaborating
+                ? 'Share the URL below to invite others to collaborate in real-time.'
+                : 'Create a shareable canvas for real-time collaboration with up to 2 people.'
+              }
+            </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">
@@ -194,20 +190,14 @@ export function CollaborationPanel({ isOpen, onClose, canvasData }: Collaboratio
                   <div className="space-y-2">
                     <Input
                       id="share-url-input"
-                      value={isCollaborating ? "https://ideascape.app/canvas/demo-collaboration-url" : ""}
+                      value={shareUrl}
                       readOnly
                       className="text-xs select-all font-mono"
-                      placeholder="Demo URL will appear here when collaboration starts..."
+                      placeholder="Share URL will appear here after creation..."
                       onClick={(e) => {
-                        // Auto-select text when clicked for easy manual copying
                         (e.target as HTMLInputElement).select();
                       }}
                     />
-                    {isCollaborating && (
-                      <div className="text-xs text-muted-foreground">
-                        🎭 Demo Mode: This is a preview URL for demonstration purposes
-                      </div>
-                    )}
                   </div>
                   <p className="text-xs text-gray-500">
                     Share this URL with others to invite them to collaborate on your canvas.
