@@ -1,0 +1,16 @@
+[project]
+project_id = "ideascape"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public"]
+
+[auth]
+enabled = false
+
+[edge_functions]
+enabled = true
+
+[analytics]
+enabled = false

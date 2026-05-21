@@ -1,0 +1,12 @@
+{
+  "tasks": {
+    "serve": "supabase functions serve make-server-832115ea"
+  },
+  "imports": {
+    "supabase-js": "npm:@supabase/supabase-js@2"
+  },
+  "compilerOptions": {
+    "allowJs": true,
+    "lib": ["deno.window"]
+  }
+}
